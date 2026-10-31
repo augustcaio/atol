@@ -12,7 +12,7 @@ window.atol { background: none; }
     min-width: 32rem;
     min-height: 4.5rem;
     margin: 0.5rem 1rem 0.75rem;
-    border-radius: 1rem;
+    border-radius: 1.25rem;
     /* pouco preenchimento: aparece o fundo desfocado, não uma camada leitosa */
     background-color: alpha(@window_bg_color, 0.12);
     /* reflexo diagonal, como luz batendo no vidro */
