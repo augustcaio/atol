@@ -42,11 +42,14 @@ em cada versão.
 
 ## Branches
 A `main` contém apenas documentação e licença. Todo o código vive em branches
-de feature, que não compartilham arquivos com a `main`.
+de feature, que não compartilham arquivos com a `main`. Uma feature que
+complementa outra nasce a partir dela.
 
 | Branch | Conteúdo | Estado |
 |--------|----------|--------|
 | `main` | Documentação e licença | — |
+| `feat/dock` | A dock (Rust + GTK4/libadwaita) | em desenvolvimento |
+| `feat/bridge` | A `feat/dock` mais a `atol-bridge` e o teste num GNOME aninhado (`dev/nested.sh`) | em desenvolvimento |
 
 ## Licença
 [GPL-3.0-or-later](LICENSE).
