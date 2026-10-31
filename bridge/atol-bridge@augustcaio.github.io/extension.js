@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
+import Graphene from 'gi://Graphene';
 import Meta from 'gi://Meta';
 import Mtk from 'gi://Mtk';
 import St from 'gi://St';
 
+import * as BoxPointer from 'resource:///org/gnome/shell/ui/boxpointer.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -11,6 +14,8 @@ const DOCK_APP_ID = 'io.github.augustcaio.Atol.Dock';
 // Padrão do Mutter 51: raio 24 px e saturação 1.25.
 const BLUR_RADIUS = 16;
 const BLUR_SATURATION = 1.8;
+// -arrow-rise dos menus no tema do Shell (.popup-menu-boxpointer).
+const POPUP_RISE = 6;
 
 // Centraliza a dock na borda inferior do monitor primário, no tamanho que o app pediu.
 const BottomCenter = GObject.registerClass({
@@ -62,6 +67,10 @@ export default class AtolBridge extends Extension {
 
     // No Wayland a janela nasce antes de o app mandar o app_id (wm_class ainda é null).
     _watch(window) {
+        if (this._docks.has(window.get_transient_for())) {
+            window.connectObject('unmanaging', () => this._fadeOut(window), this);
+            return;
+        }
         if (window.get_wm_class() !== null) {
             this._track(window);
             return;
@@ -121,6 +130,35 @@ export default class AtolBridge extends Extension {
     _replaceAll() {
         for (const window of this._docks.keys())
             this._place(window);
+    }
+
+    // Painel aberto pela dock fechando: some como os menus do Shell (BoxPointer.close),
+    // o inverso da abertura no CSS da dock. O GTK não pode animar isso, porque o compositor
+    // desfaz o popup na hora num clique fora; a animação roda sobre um retrato da janela.
+    _fadeOut(window) {
+        const actor = window.get_compositor_private();
+        const content = actor?.paint_to_content(null);
+        if (!content)
+            return;
+        const ghost = new Clutter.Actor({
+            content,
+            x: actor.x,
+            y: actor.y,
+            width: actor.width,
+            height: actor.height,
+            pivot_point: new Graphene.Point({x: 0.5, y: 1}),
+        });
+        actor.get_parent().insert_child_above(ghost, actor);
+        const motion = St.Settings.get().reducedMotion !== St.ReducedMotion.REDUCE;
+        ghost.ease({
+            opacity: 0,
+            translation_y: motion ? POPUP_RISE : 0,
+            scale_x: motion ? 0.96 : 1,
+            scale_y: motion ? 0.96 : 1,
+            duration: BoxPointer.POPUP_ANIMATION_TIME,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onStopped: () => ghost.destroy(),
+        });
     }
 
     _syncStrut(window) {
