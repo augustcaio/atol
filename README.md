@@ -50,6 +50,7 @@ complementa outra nasce a partir dela.
 | `main` | Documentação e licença | — |
 | `feat/dock` | A dock (Rust + GTK4/libadwaita) | em desenvolvimento |
 | `feat/bridge` | A `feat/dock` mais a `atol-bridge` e o teste num GNOME aninhado (`dev/nested.sh`) | em desenvolvimento |
+| `feat/dash` | A `feat/bridge` mais o conteúdo da dock: favoritos, apps abertos, arrastar para reordenar, fixar e desafixar | em desenvolvimento |
 
 ## Licença
 [GPL-3.0-or-later](LICENSE).
