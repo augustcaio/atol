@@ -17,7 +17,7 @@ window.atol { background: none; }
     padding: 0.375rem;
     border-spacing: 0.25rem;
     margin: 0.5rem 1rem 0.75rem;
-    border-radius: 1.25rem;
+    border-radius: 0.625rem;
     /* pouco preenchimento: aparece o fundo desfocado, não uma camada leitosa */
     background-color: alpha(@window_bg_color, 0.07);
     /* reflexo diagonal, como luz batendo no vidro */
@@ -33,8 +33,8 @@ window.atol { background: none; }
 }
 .dock button.app {
     padding: 0.375rem;
-    /* raio da pílula menos o padding dela (1.25rem − 0.375rem): encaixe concêntrico */
-    border-radius: 0.875rem;
+    /* raio da pílula menos o padding dela (0.625rem − 0.375rem): encaixe concêntrico */
+    border-radius: 0.25rem;
     background: none;
     box-shadow: none;
 }
