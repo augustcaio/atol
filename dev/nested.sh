@@ -21,13 +21,14 @@ mkdir -p "$tmp/data/gnome-shell/extensions"
 ln -s "$repo/bridge/$uuid" "$tmp/data/gnome-shell/extensions/$uuid"
 
 # Config e dados isolados: o dconf do aninhado não é o da sessão real.
+# GTK_A11Y=none: sem o registro de acessibilidade no barramento aninhado, os apps GTK
+# (a dock e o visualizador do devkit) não conseguem se registrar e não abrem.
 XDG_CONFIG_HOME="$tmp/config" XDG_DATA_HOME="$tmp/data" \
-dbus-run-session -- sh -c '
+GTK_A11Y=none dbus-run-session -- sh -c '
     gsettings set org.gnome.shell enabled-extensions "[\"$1\"]"
     gnome-shell --wayland --no-x11 --wayland-display "$2" ${4:---devkit} &
     shell=$!
     while [ ! -S "$XDG_RUNTIME_DIR/$2" ]; do sleep 0.2; done
-    # sem registro de acessibilidade no barramento aninhado, o app não consegue se registrar
-    WAYLAND_DISPLAY="$2" GDK_BACKEND=wayland GTK_A11Y=none "$3" &
+    WAYLAND_DISPLAY="$2" GDK_BACKEND=wayland "$3" &
     wait $shell
 ' sh "$uuid" "$display" "$CARGO_TARGET_DIR/debug/atol-dock" "$*"

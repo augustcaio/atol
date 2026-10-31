@@ -36,7 +36,7 @@ export default class AtolBridge extends Extension {
         global.display.connectObject('window-created', (_, w) => this._watch(w), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._replaceAll(), this);
         for (const actor of global.get_window_actors())
-            this._track(actor.meta_window);
+            this._track(actor.meta_window, true);
     }
 
     disable() {
@@ -60,7 +60,7 @@ export default class AtolBridge extends Extension {
         }, this);
     }
 
-    _track(window) {
+    _track(window, existing = false) {
         // _docks é null se a extensão foi desligada antes de o app_id chegar
         if (!this._docks || window.get_wm_class() !== DOCK_APP_ID || this._docks.has(window))
             return;
@@ -81,7 +81,10 @@ export default class AtolBridge extends Extension {
             'size-changed', () => this._syncStrut(window),
             'unmanaged', () => this._untrack(window, false),
             this);
-        this._place(window);
+        // Janela nova recebe a restrição no posicionamento inicial; mover antes disso
+        // (janela ainda não pronta) gera avisos do Mutter.
+        if (existing)
+            this._place(window);
     }
 
     _untrack(window, restore) {
