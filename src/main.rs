@@ -14,9 +14,9 @@ window.atol { background: none; }
     margin: 0.5rem 1rem 0.75rem;
     border-radius: 1.25rem;
     /* pouco preenchimento: aparece o fundo desfocado, não uma camada leitosa */
-    background-color: alpha(@window_bg_color, 0.12);
+    background-color: alpha(@window_bg_color, 0.07);
     /* reflexo diagonal, como luz batendo no vidro */
-    background-image: linear-gradient(135deg, alpha(white, 0.16), alpha(white, 0.03) 45%,
+    background-image: linear-gradient(135deg, alpha(white, 0.12), alpha(white, 0.03) 45%,
                                       transparent 60%, alpha(white, 0.06));
     backdrop-filter: blur(1.5rem);
     /* brilho especular na aresta de cima, reflexo fraco embaixo e brilho interno; sem contorno */
