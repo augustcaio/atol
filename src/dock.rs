@@ -324,8 +324,12 @@ impl Dock {
         self.save_favorites(&favorites);
     }
 
+    // Regra dos métodos de arrasto: nenhum borrow de RefCell fica aberto durante chamadas
+    // ao GTK. Inserir, esconder ou remover um widget sob o ponteiro dispara na hora eventos
+    // de entrada/saída, que voltam para cá; um borrow aberto vira panic e derruba a dock.
+
     fn begin_drag(&self, id: &str) {
-        let slots = self.slots.borrow();
+        let slots = self.slots.borrow().clone();
         let bounds: Vec<_> = slots.iter().filter_map(|(_, w)| w.compute_bounds(&self.widget)).collect();
         let (x0, slot) = match bounds.as_slice() {
             [] => (0.0, 1.0),
@@ -335,56 +339,59 @@ impl Dock {
                 (f64::from(first.x()) - (slot - f64::from(first.width())) / 2.0, slot)
             }
         };
-        let mut drag = Drag {
+        let position = slots.iter().position(|(s, _)| s == id);
+        // Um favorito arrastado deixa uma vaga do tamanho dele, sem animação, no lugar onde estava.
+        let first_gap = position.map(|_| gap(slot));
+        self.drag.replace(Some(Drag {
             others: slots.iter().map(|(s, _)| s.clone()).filter(|s| s != id).collect(),
             x0,
             slot,
-            index: None,
-            gap: None,
-        };
-        // Um favorito arrastado deixa uma vaga do tamanho dele, sem animação, no lugar onde estava.
-        if let Some(position) = slots.iter().position(|(s, _)| s == id) {
+            index: position,
+            gap: first_gap.clone(),
+        }));
+        if let (Some(position), Some(first_gap)) = (position, first_gap) {
             let item = &slots[position].1;
-            let gap = gap(slot);
-            self.widget.insert_child_after(&gap, Some(item));
+            self.widget.insert_child_after(&first_gap, Some(item));
             item.set_visible(false);
-            drag.index = Some(position);
-            drag.gap = Some(gap);
         }
-        self.drag.replace(Some(drag));
     }
 
     fn drag_motion(&self, x: f64) {
-        let mut drag = self.drag.borrow_mut();
-        let Some(drag) = drag.as_mut() else { return };
-        let index = drop_index(x, drag.x0, drag.slot, drag.others.len());
-        if drag.index == Some(index) {
-            return;
-        }
-        if let Some(old) = drag.gap.take() {
+        let (old, new, after, width) = {
+            let mut drag = self.drag.borrow_mut();
+            let Some(drag) = drag.as_mut() else { return };
+            let index = drop_index(x, drag.x0, drag.slot, drag.others.len());
+            if drag.index == Some(index) {
+                return;
+            }
+            // A vaga nova entra antes do favorito que vai ser empurrado, ou depois do último.
+            let slots = self.slots.borrow();
+            let widget_of = |id: &String| {
+                slots.iter().find(|(s, _)| s == id).map(|(_, w)| w.clone().upcast::<gtk::Widget>())
+            };
+            let after = match drag.others.get(index) {
+                Some(next) => widget_of(next).and_then(|w| w.prev_sibling()),
+                None => drag.others.last().and_then(widget_of),
+            };
+            let new = gap(0.0);
+            drag.index = Some(index);
+            (drag.gap.replace(new.clone()), new, after, drag.slot)
+        };
+        if let Some(old) = old {
             close_gap(old);
         }
-        // A vaga nova entra antes do favorito que vai ser empurrado, ou depois do último.
-        let slots = self.slots.borrow();
-        let widget_of = |id: &String| slots.iter().find(|(s, _)| s == id).map(|(_, w)| w.clone().upcast::<gtk::Widget>());
-        let after = match drag.others.get(index) {
-            Some(next) => widget_of(next).and_then(|w| w.prev_sibling()),
-            None => drag.others.last().and_then(widget_of),
-        };
-        let new = gap(0.0);
         self.widget.insert_child_after(&new, after.as_ref());
-        animate_width(&new, drag.slot, |_| {});
-        drag.index = Some(index);
-        drag.gap = Some(new);
+        animate_width(&new, width, |_| {});
     }
 
     // Saindo da dock (para desafixar no botão de aplicativos, por exemplo), a vaga fecha.
     fn drag_leave(&self) {
-        if let Some(drag) = self.drag.borrow_mut().as_mut() {
+        let old = self.drag.borrow_mut().as_mut().and_then(|drag| {
             drag.index = None;
-            if let Some(old) = drag.gap.take() {
-                close_gap(old);
-            }
+            drag.gap.take()
+        });
+        if let Some(old) = old {
+            close_gap(old);
         }
     }
 
@@ -393,28 +400,32 @@ impl Dock {
         if gio_unix::DesktopAppInfo::new(id).is_none() {
             return false;
         }
-        let drag = self.drag.borrow();
-        let Some(Drag { others, index: Some(index), .. }) = drag.as_ref() else { return false };
-        let before = others.get(*index).map(String::as_str);
+        let target = self.drag.borrow().as_ref().and_then(|d| Some((d.others.clone(), d.index?)));
+        let Some((others, index)) = target else { return false };
+        let before = others.get(index).map(String::as_str);
         self.save_favorites_later(move_favorite(&self.favorites(), id, before));
         true
     }
 
     // Terminou (soltou ou cancelou): a dock volta a ser desenhada a partir dos favoritos.
+    // Fica para o idle: o GTK pode encerrar o arrasto no meio de outro callback
+    // (até dentro do begin_drag, se cancelar ao esconder o botão).
     fn end_drag(self: &Rc<Self>) {
-        self.drag.replace(None);
-        self.layout.replace(None);
         let weak = Rc::downgrade(self);
         glib::idle_add_local_once(move || {
             if let Some(dock) = weak.upgrade() {
+                dock.drag.replace(None);
+                dock.layout.replace(None);
                 dock.refresh();
             }
         });
     }
 
     fn sync_indicators(&self) {
-        let running = self.running.borrow();
-        for (id, dot) in self.indicators.borrow().iter() {
+        // Cópias: nenhum borrow aberto enquanto os widgets mudam.
+        let running = self.running.borrow().clone();
+        let indicators = self.indicators.borrow().clone();
+        for (id, dot) in &indicators {
             let app = running.iter().find(|a| &a.id == id);
             dot.set_visible(app.is_some());
             let mut classes = vec!["indicator"];
