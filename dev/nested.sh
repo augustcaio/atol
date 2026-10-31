@@ -8,7 +8,7 @@ set -eu
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 uuid=atol-bridge@augustcaio.github.io
-display=atol-nested
+display=atol-nested-$$  # nome próprio por execução: testes em paralelo não colidem
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/atol/target}"
 
 cargo build --manifest-path "$repo/Cargo.toml"
