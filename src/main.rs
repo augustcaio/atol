@@ -12,8 +12,9 @@ const APP_ID: &str = "io.github.augustcaio.Atol.Dock";
 const CSS: &str = "
 window.atol { background: none; }
 .dock {
-    /* sem altura fixa: o botão quadrado (ícone 2.5rem + 0.75rem) mais o padding dão 4rem */
-    padding: 0.375rem 0.5rem;
+    /* sem altura fixa: o botão quadrado (ícone 2.5rem + 0.75rem) mais o padding dão 4rem.
+       Padding igual nos quatro lados: os cantos do hover ficam concêntricos aos da pílula. */
+    padding: 0.375rem;
     border-spacing: 0.25rem;
     margin: 0.5rem 1rem 0.75rem;
     border-radius: 1.25rem;
@@ -32,6 +33,7 @@ window.atol { background: none; }
 }
 .dock button.app {
     padding: 0.375rem;
+    /* raio da pílula menos o padding dela (1.25rem − 0.375rem): encaixe concêntrico */
     border-radius: 0.875rem;
     background: none;
     box-shadow: none;
