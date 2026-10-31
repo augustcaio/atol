@@ -1,6 +1,6 @@
 # Atol
 
-*A dynamic dock and panel for GNOME 50+*
+*A dynamic dock and panel for GNOME 51+*
 
 Dock e painel para o GNOME, com widgets próprios embutidos, sem depender de
 extensões externas. O nome vem de um atol, um anel de ilhas: a dock e o painel
@@ -32,13 +32,12 @@ do GNOME exija ajuste num lugar só.
 | `atol-bridge` | Extensão do GNOME Shell que liga o aplicativo ao compositor |
 
 ## Compatibilidade
-O GNOME lança uma versão a cada seis meses, e cada uma pode exigir ajustes na
-ponte.
+O Atol suporta o GNOME 51 em diante. O GNOME lança uma versão a cada seis
+meses, e cada uma pode exigir ajustes na ponte.
 
 | GNOME | Atol |
 |-------|------|
 | 51 | em desenvolvimento |
-| 50 | não testado |
 
 ## Branches
 A `main` contém apenas documentação e licença. Todo o código vive em branches
