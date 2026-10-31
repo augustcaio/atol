@@ -15,14 +15,18 @@ const FAVORITES: &str = "favorite-apps";
 /// Favoritos, na ordem do usuário, e depois os apps abertos que não são favoritos.
 type Layout = (Vec<String>, Vec<String>);
 
-/// Arrasto em andamento. A grade dos favoritos é medida antes de qualquer animação:
-/// se a posição de destino seguisse os ícones deslizando, o espaço ficaria pulando.
+/// Arrasto em andamento, como no Dash do GNOME: o ícone arrastado fica no lugar,
+/// apagado, e uma vaga abre onde ele vai entrar. A grade dos favoritos é medida antes
+/// de qualquer animação: se o destino seguisse os ícones deslizando, a vaga ficaria pulando.
 struct Drag {
-    /// Favoritos sem o app arrastado, na ordem da dock.
-    others: Vec<String>,
+    /// Posição do app arrastado nos favoritos, se for um.
+    from: Option<usize>,
     /// Borda esquerda do primeiro favorito e a largura de cada vaga.
     x0: f64,
     slot: f64,
+    /// Largura da dock no começo do arrasto.
+    width: f64,
+    /// Onde o app entra nos favoritos, e a vaga aberta ali.
     index: Option<usize>,
     gap: Option<gtk::Box>,
 }
@@ -203,12 +207,19 @@ impl Dock {
                 gtk::IconLookupFlags::empty(),
             );
             source.set_icon(Some(&paintable), size / 2, size / 2);
+            // Esconder o botão cancelaria o arrasto; o GNOME só o apaga (scaleAndFade).
+            if let Some(item) = source.widget().and_then(|button| button.parent()) {
+                item.add_css_class("dragging");
+            }
             if let Some(dock) = weak.upgrade() {
                 dock.begin_drag(&app_id);
             }
         });
         let weak = Rc::downgrade(self);
-        drag.connect_drag_end(move |_, _, _| {
+        drag.connect_drag_end(move |source, _, _| {
+            if let Some(item) = source.widget().and_then(|button| button.parent()) {
+                item.remove_css_class("dragging");
+            }
             if let Some(dock) = weak.upgrade() {
                 dock.end_drag();
             }
@@ -339,49 +350,49 @@ impl Dock {
                 (f64::from(first.x()) - (slot - f64::from(first.width())) / 2.0, slot)
             }
         };
-        let position = slots.iter().position(|(s, _)| s == id);
-        // Um favorito arrastado deixa uma vaga do tamanho dele, sem animação, no lugar onde estava.
-        let first_gap = position.map(|_| gap(slot));
         self.drag.replace(Some(Drag {
-            others: slots.iter().map(|(s, _)| s.clone()).filter(|s| s != id).collect(),
+            from: slots.iter().position(|(s, _)| s == id),
             x0,
             slot,
-            index: position,
-            gap: first_gap.clone(),
+            width: f64::from(self.widget.width()),
+            index: None,
+            gap: None,
         }));
-        if let (Some(position), Some(first_gap)) = (position, first_gap) {
-            let item = &slots[position].1;
-            self.widget.insert_child_after(&first_gap, Some(item));
-            item.set_visible(false);
-        }
     }
 
+    // Como no Dash do GNOME: a vaga já aberta muda de lugar sem animação; só abrir
+    // e fechar animam.
     fn drag_motion(&self, x: f64) {
-        let (old, new, after, width) = {
+        let (old, new, after) = {
             let mut drag = self.drag.borrow_mut();
             let Some(drag) = drag.as_mut() else { return };
-            let index = drop_index(x, drag.x0, drag.slot, drag.others.len());
-            if drag.index == Some(index) {
+            let slots = self.slots.borrow();
+            // A janela fica centrada: quando a vaga a alarga, ela anda para a esquerda e
+            // o ponteiro, medido na dock, anda junto. Descontar mantém o destino preso à tela.
+            let x = x - (f64::from(self.widget.width()) - drag.width) / 2.0;
+            let index = drop_index(x, drag.x0, drag.slot, slots.len());
+            // Vaga colada no próprio ícone não mudaria nada; o GNOME nem abre.
+            let index = Some(index).filter(|&i| drag.from.is_none_or(|f| i != f && i != f + 1));
+            if drag.index == index {
                 return;
             }
-            // A vaga nova entra antes do favorito que vai ser empurrado, ou depois do último.
-            let slots = self.slots.borrow();
-            let widget_of = |id: &String| {
-                slots.iter().find(|(s, _)| s == id).map(|(_, w)| w.clone().upcast::<gtk::Widget>())
-            };
-            let after = match drag.others.get(index) {
-                Some(next) => widget_of(next).and_then(|w| w.prev_sibling()),
-                None => drag.others.last().and_then(widget_of),
-            };
-            let new = gap(0.0);
-            drag.index = Some(index);
-            (drag.gap.replace(new.clone()), new, after, drag.slot)
+            drag.index = index;
+            let old = drag.gap.take();
+            let width = if old.is_some() { drag.slot } else { 0.0 };
+            drag.gap = index.map(|_| gap(width));
+            // A vaga entra depois do favorito anterior ao destino, ou no começo.
+            let after = index.and_then(|i| i.checked_sub(1)).map(|prev| slots[prev].1.clone());
+            (old, drag.gap.clone().map(|new| (new, drag.slot)), after)
         };
-        if let Some(old) = old {
-            close_gap(old);
+        match (old, &new) {
+            (Some(old), Some(_)) => self.widget.remove(&old),
+            (Some(old), None) => close_gap(old),
+            (None, _) => {}
         }
-        self.widget.insert_child_after(&new, after.as_ref());
-        animate_width(&new, width, |_| {});
+        if let Some((new, slot)) = new {
+            self.widget.insert_child_after(&new, after.as_ref());
+            animate_width(&new, slot, |_| {});
+        }
     }
 
     // Saindo da dock (para desafixar no botão de aplicativos, por exemplo), a vaga fecha.
@@ -400,22 +411,23 @@ impl Dock {
         if gio_unix::DesktopAppInfo::new(id).is_none() {
             return false;
         }
-        let target = self.drag.borrow().as_ref().and_then(|d| Some((d.others.clone(), d.index?)));
-        let Some((others, index)) = target else { return false };
-        let before = others.get(index).map(String::as_str);
-        self.save_favorites_later(move_favorite(&self.favorites(), id, before));
+        let Some(index) = self.drag.borrow().as_ref().map(|d| d.index) else { return false };
+        // Sem vaga, o app foi solto no próprio lugar: nada muda, como no Dash do GNOME.
+        let Some(index) = index else { return true };
+        let before = self.slots.borrow().get(index).map(|(s, _)| s.clone());
+        self.save_favorites_later(move_favorite(&self.favorites(), id, before.as_deref()));
         true
     }
 
-    // Terminou (soltou ou cancelou): a dock volta a ser desenhada a partir dos favoritos.
-    // Fica para o idle: o GTK pode encerrar o arrasto no meio de outro callback
-    // (até dentro do begin_drag, se cancelar ao esconder o botão).
+    // Terminou (soltou ou cancelou): a vaga fecha e a dock acompanha os favoritos.
+    // Fica para o idle: o GTK pode encerrar o arrasto no meio de outro callback.
     fn end_drag(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
         glib::idle_add_local_once(move || {
             if let Some(dock) = weak.upgrade() {
-                dock.drag.replace(None);
-                dock.layout.replace(None);
+                if let Some(gap) = dock.drag.take().and_then(|d| d.gap) {
+                    close_gap(gap);
+                }
                 dock.refresh();
             }
         });
@@ -475,6 +487,11 @@ fn animate_width(widget: &gtk::Box, to: f64, done: impl Fn(&adw::TimedAnimation)
 
 fn close_gap(gap: gtk::Box) {
     animate_width(&gap.clone(), 0.0, move |_| {
+        // Removida no meio da animação (a dock se reconstruiu), a animação pula para o
+        // fim já dentro do unparent; remover de novo ali derrubava a dock (SIGSEGV).
+        if !gap.is_mapped() {
+            return;
+        }
         if let Some(parent) = gap.parent().and_downcast::<gtk::Box>() {
             parent.remove(&gap);
         }

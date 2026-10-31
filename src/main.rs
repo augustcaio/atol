@@ -44,6 +44,9 @@ window.atol { background: none; }
 .dock button.app:hover { background-color: alpha(white, 0.1); }
 .dock button.app:active { background-color: alpha(white, 0.18); }
 .dock button.app > image { -gtk-icon-size: 2.5rem; }
+/* Item sendo arrastado: fica no lugar, encolhe e apaga, como o scaleAndFade do GNOME. */
+.dock > overlay { transition: opacity 250ms ease-out, transform 250ms ease-out; }
+.dock > overlay.dragging { opacity: 0; transform: scale(0.5); }
 .dock > separator {
     margin: 0.5rem 0.375rem;
     background-color: alpha(@window_fg_color, 0.18);
