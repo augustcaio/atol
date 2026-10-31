@@ -2,9 +2,10 @@
 
 *A dynamic dock and panel for GNOME 51+*
 
-Dock e painel para o GNOME, com widgets próprios embutidos no lugar de
-extensões de terceiros. O nome vem de um atol, um anel de ilhas: a dock e o painel
-são ilhas flutuantes de um mesmo conjunto.
+Dock e painel modulares para o GNOME. A dock começa vazia, e o usuário monta o que
+ela mostra acoplando widgets a ela. Os widgets são desenvolvidos e distribuídos pelo
+próprio projeto Atol, no lugar de extensões de terceiros. O nome vem de um atol, um
+anel de ilhas: a dock e o painel são ilhas flutuantes de um mesmo conjunto.
 
 > Em desenvolvimento. Ainda não há versão utilizável.
 
@@ -51,6 +52,7 @@ complementa outra nasce a partir dela.
 | `feat/dock` | A dock (Rust + GTK4/libadwaita) | em desenvolvimento |
 | `feat/bridge` | A `feat/dock` mais a `atol-bridge` e o teste num GNOME aninhado (`dev/nested.sh`) | em desenvolvimento |
 | `feat/dash` | A `feat/bridge` mais o conteúdo da dock: favoritos, apps abertos, arrastar para reordenar, fixar e desafixar | em desenvolvimento |
+| `feat/shell` | A `feat/dash` sem o conteúdo do Dash: a dock vazia, só o vidro onde os widgets serão acoplados | em desenvolvimento |
 
 ## Licença
 [GPL-3.0-or-later](LICENSE).
