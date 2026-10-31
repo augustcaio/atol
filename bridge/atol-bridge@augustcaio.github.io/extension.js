@@ -7,6 +7,8 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import {AppsService} from './apps.js';
+
 const DOCK_APP_ID = 'io.github.augustcaio.Atol.Dock';
 
 // Centraliza a dock na borda inferior do monitor primário, no tamanho que o app pediu.
@@ -32,6 +34,7 @@ export default class AtolBridge extends Extension {
     enable() {
         this._constraint = new BottomCenter();
         this._docks = new Map();
+        this._apps = new AppsService();
 
         global.display.connectObject('window-created', (_, w) => this._watch(w), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._replaceAll(), this);
@@ -46,6 +49,8 @@ export default class AtolBridge extends Extension {
             this._untrack(window, true);
         this._docks = null;
         this._constraint = null;
+        this._apps.destroy();
+        this._apps = null;
     }
 
     // No Wayland a janela nasce antes de o app mandar o app_id (wm_class ainda é null).
