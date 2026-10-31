@@ -10,7 +10,7 @@ const CSS: &str = "
 window.atol { background: none; }
 .dock {
     min-width: 32rem;
-    min-height: 4.5rem;
+    min-height: 4rem;
     margin: 0.5rem 1rem 0.75rem;
     border-radius: 1.25rem;
     /* pouco preenchimento: aparece o fundo desfocado, não uma camada leitosa */
