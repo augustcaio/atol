@@ -36,6 +36,7 @@ touch "$tmp/stamp"
 # GTK_A11Y=none: sem o registro de acessibilidade no barramento aninhado, os apps GTK
 # (a dock e o visualizador do devkit) não conseguem se registrar e não abrem.
 export repo uuid display stamp="$tmp/stamp" extra="$*"
+# shellcheck disable=SC2016 # aspas simples de propósito: expande no sh de dentro, via export
 XDG_CONFIG_HOME="$tmp/config" XDG_DATA_HOME="$tmp/data" \
 GTK_A11Y=none dbus-run-session -- sh -c '
     gsettings set org.gnome.shell enabled-extensions "[\"$uuid\"]"
