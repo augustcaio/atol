@@ -53,6 +53,10 @@ complementa outra nasce a partir dela.
 | `feat/bridge` | A `feat/dock` mais a `atol-bridge` e o teste num GNOME aninhado (`dev/nested.sh`) | em desenvolvimento |
 | `feat/dash` | A `feat/bridge` mais o conteúdo da dock: favoritos, apps abertos, arrastar para reordenar, fixar e desafixar | em desenvolvimento |
 | `feat/shell` | A `feat/dash` sem o conteúdo do Dash: a dock vazia, só o vidro onde os widgets serão acoplados | em desenvolvimento |
+| `feat/launcher` | A `feat/shell` mais o widget lançador de aplicativos | em desenvolvimento |
+
+## Diário
+O registro do que foi feito em cada sessão fica em [`docs/diario/`](docs/diario/).
 
 ## Licença
 [GPL-3.0-or-later](LICENSE).
