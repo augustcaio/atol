@@ -1,0 +1,4 @@
+# a compilação usa CARGO_TARGET_DIR=~/.cache/atol/target; isto é só uma garantia
+/target
+.idea/
+.vscode/
