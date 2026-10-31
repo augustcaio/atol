@@ -10,6 +10,9 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {AppsService} from './apps.js';
 
 const DOCK_APP_ID = 'io.github.augustcaio.Atol.Dock';
+// Padrão do Mutter 51: raio 24 px e saturação 1.25.
+const BLUR_RADIUS = 16;
+const BLUR_SATURATION = 1.8;
 
 // Centraliza a dock na borda inferior do monitor primário, no tamanho que o app pediu.
 const BottomCenter = GObject.registerClass({
@@ -36,6 +39,13 @@ export default class AtolBridge extends Extension {
         this._docks = new Map();
         this._apps = new AppsService();
 
+        // O vidro da dock é blur do Mutter (ext-background-effect), e o protocolo não leva
+        // força nem cor. Como no Liquid Glass: blur leve, para o papel de parede continuar
+        // reconhecível (blur forte mistura tudo num tom leitoso), e saturação alta, para as
+        // cores atrás da dock ficarem vivas. Vale para a sessão toda; o disable() devolve.
+        this._blurDefaults = global.compositor.get_background_blur_params();
+        global.compositor.set_background_blur_params(BLUR_RADIUS, BLUR_SATURATION, this._blurDefaults[2]);
+
         global.display.connectObject('window-created', (_, w) => this._watch(w), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._replaceAll(), this);
         for (const actor of global.get_window_actors())
@@ -51,6 +61,8 @@ export default class AtolBridge extends Extension {
         this._constraint = null;
         this._apps.destroy();
         this._apps = null;
+        global.compositor.set_background_blur_params(...this._blurDefaults);
+        this._blurDefaults = null;
     }
 
     // No Wayland a janela nasce antes de o app mandar o app_id (wm_class ainda é null).
