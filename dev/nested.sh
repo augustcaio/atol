@@ -18,7 +18,16 @@ tmp=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/atol-nested.XXXXXX")
 # deixar para trás, o próximo login da sessão real desliga todas as extensões.
 guard="${XDG_RUNTIME_DIR:-/tmp}/gnome-shell-disable-extensions"
 rm -f "$guard"
-trap 'rm -rf "$tmp" "$guard"' EXIT
+cleanup() {
+    # Serviços da sessão aninhada (gvfsd-metadata, por exemplo) ainda gravam em $tmp
+    # logo depois que o Shell fecha; apagar antes deixa a pasta para trás. Espera até 5 s.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        grep -qsF "XDG_DATA_HOME=$tmp/data" /proc/[0-9]*/environ || break
+        sleep 0.5
+    done
+    rm -rf "$tmp" "$guard"
+}
+trap cleanup EXIT
 mkdir -p "$tmp/data/gnome-shell/extensions"
 ln -s "$repo/bridge/$uuid" "$tmp/data/gnome-shell/extensions/$uuid"
 touch "$tmp/stamp"
