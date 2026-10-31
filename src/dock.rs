@@ -56,6 +56,15 @@ impl Dock {
         });
         dock.subscription.replace(Some(subscription));
 
+        // Soltar um app na dock fixa ele ali, ou só muda a ordem se já é favorito.
+        let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+        let weak = Rc::downgrade(&dock);
+        drop.connect_drop(move |_, value, x, _| match (weak.upgrade(), value.get::<String>()) {
+            (Some(dock), Ok(id)) => dock.drop_at(&id, x),
+            _ => false,
+        });
+        dock.widget.add_controller(drop);
+
         dock.refresh();
         dock
     }
@@ -64,8 +73,7 @@ impl Dock {
         if self.menu_open.get() {
             return;
         }
-        let favorites: Vec<String> = self.shell.strv(FAVORITES).iter().map(ToString::to_string).collect();
-        let layout = layout(&favorites, &self.running.borrow(), |id| {
+        let layout = layout(&self.favorites(), &self.running.borrow(), |id| {
             gio_unix::DesktopAppInfo::new(id).is_some()
         });
         // Só reconstrói quando a lista muda; foco e urgência só trocam os indicadores.
@@ -102,6 +110,18 @@ impl Dock {
             .build();
         let conn = self.conn.clone();
         show_apps.connect_clicked(move |_| bridge::call(&conn, "ToggleAppGrid", ()));
+        // Soltar um favorito aqui desafixa, como no Dash do GNOME.
+        let unpin = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+        let weak = Rc::downgrade(self);
+        unpin.connect_drop(move |_, value, _, _| match (weak.upgrade(), value.get::<String>()) {
+            (Some(dock), Ok(id)) if dock.favorites().contains(&id) => {
+                let favorites = dock.favorites().into_iter().filter(|f| *f != id).collect();
+                dock.save_favorites_later(favorites);
+                true
+            }
+            _ => false,
+        });
+        show_apps.add_controller(unpin);
         self.widget.append(&show_apps);
     }
 
@@ -135,6 +155,17 @@ impl Dock {
             }
         });
         button.add_controller(right);
+
+        // Arrastar leva o id do app: para outra posição, para fixar ou para desafixar.
+        let drag = gtk::DragSource::builder()
+            .actions(gtk::gdk::DragAction::MOVE)
+            .content(&gtk::gdk::ContentProvider::for_value(&id.to_value()))
+            .build();
+        drag.connect_drag_begin(move |source, _| {
+            let paintable = gtk::WidgetPaintable::new(Some(&icon));
+            source.set_icon(Some(&paintable), icon.width() / 2, icon.height() / 2);
+        });
+        button.add_controller(drag);
 
         // O ponto fica sobre a borda de baixo do botão e não pega cliques.
         let dot = gtk::Box::builder()
@@ -212,19 +243,60 @@ impl Dock {
         group
     }
 
+    fn favorites(&self) -> Vec<String> {
+        self.shell.strv(FAVORITES).iter().map(ToString::to_string).collect()
+    }
+
+    fn save_favorites(&self, favorites: &[String]) {
+        let favorites: Vec<&str> = favorites.iter().map(String::as_str).collect();
+        if let Err(e) = self.shell.set_strv(FAVORITES, favorites.as_slice()) {
+            glib::g_warning!("atol", "não deu para salvar os favoritos: {e}");
+        }
+    }
+
+    // Salvar reconstrói a dock; depois de um drop, espera o arrasto terminar.
+    fn save_favorites_later(self: &Rc<Self>, favorites: Vec<String>) {
+        let weak = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            if let Some(dock) = weak.upgrade() {
+                dock.save_favorites(&favorites);
+            }
+        });
+    }
+
     // Fixar põe o app no fim dos favoritos, como o Dash do GNOME.
     fn toggle_pin(&self, id: &str) {
-        let mut favorites: Vec<String> = self.shell.strv(FAVORITES).iter().map(ToString::to_string).collect();
+        let mut favorites = self.favorites();
         match favorites.iter().position(|f| f == id) {
             Some(i) => {
                 favorites.remove(i);
             }
             None => favorites.push(id.to_owned()),
         }
-        let favorites: Vec<&str> = favorites.iter().map(String::as_str).collect();
-        if let Err(e) = self.shell.set_strv(FAVORITES, favorites.as_slice()) {
-            glib::g_warning!("atol", "não deu para salvar os favoritos: {e}");
+        self.save_favorites(&favorites);
+    }
+
+    fn drop_at(self: &Rc<Self>, id: &str, x: f64) -> bool {
+        // Qualquer texto pode ser arrastado até aqui; só apps instalados viram favoritos.
+        if gio_unix::DesktopAppInfo::new(id).is_none() {
+            return false;
         }
+        let pinned = self.layout.borrow().as_ref().map(|(p, _)| p.clone()).unwrap_or_default();
+        // Os primeiros filhos da dock são os favoritos, na ordem de `pinned`;
+        // o app solto entra antes do primeiro cujo centro fica à direita do ponto.
+        let mut before = None;
+        let mut child = self.widget.first_child();
+        for pinned_id in &pinned {
+            let Some(widget) = child else { break };
+            let center = widget.compute_bounds(&self.widget).map(|b| f64::from(b.x() + b.width() / 2.0));
+            if pinned_id != id && center.is_some_and(|c| x < c) {
+                before = Some(pinned_id.as_str());
+                break;
+            }
+            child = widget.next_sibling();
+        }
+        self.save_favorites_later(move_favorite(&self.favorites(), id, before));
+        true
     }
 
     fn sync_indicators(&self) {
@@ -253,6 +325,14 @@ fn layout(favorites: &[String], running: &[RunningApp], installed: impl Fn(&str)
         .cloned()
         .collect();
     (pinned, others)
+}
+
+/// Tira `id` dos favoritos e o põe antes de `before`, ou no fim.
+fn move_favorite(favorites: &[String], id: &str, before: Option<&str>) -> Vec<String> {
+    let mut moved: Vec<String> = favorites.iter().filter(|f| *f != id).cloned().collect();
+    let index = before.and_then(|b| moved.iter().position(|f| f == b)).unwrap_or(moved.len());
+    moved.insert(index, id.to_owned());
+    moved
 }
 
 // Mesma ordem do menu do Dash: ações do app, nova janela, fixar, detalhes, sair.
@@ -323,6 +403,16 @@ mod tests {
         let (pinned, others) = layout(&favorites, &running, |_| true);
         assert_eq!(pinned, ["a", "b"]);
         assert_eq!(others, ["c", "d"]);
+    }
+
+    #[test]
+    fn moving_a_favorite_keeps_the_others_in_order() {
+        let favorites: Vec<String> = ["a", "b", "c"].map(String::from).into();
+        assert_eq!(move_favorite(&favorites, "c", Some("a")), ["c", "a", "b"]);
+        assert_eq!(move_favorite(&favorites, "a", None), ["b", "c", "a"]);
+        // um app novo entra como favorito; um `before` que sumiu manda para o fim
+        assert_eq!(move_favorite(&favorites, "d", Some("b")), ["a", "d", "b", "c"]);
+        assert_eq!(move_favorite(&favorites, "d", Some("x")), ["a", "b", "c", "d"]);
     }
 
     #[test]
