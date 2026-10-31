@@ -7,8 +7,6 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-import {AppsService} from './apps.js';
-
 const DOCK_APP_ID = 'io.github.augustcaio.Atol.Dock';
 // Padrão do Mutter 51: raio 24 px e saturação 1.25.
 const BLUR_RADIUS = 16;
@@ -37,7 +35,6 @@ export default class AtolBridge extends Extension {
     enable() {
         this._constraint = new BottomCenter();
         this._docks = new Map();
-        this._apps = new AppsService();
 
         // O vidro da dock é blur do Mutter (ext-background-effect), e o protocolo não leva
         // força nem cor. Como no Liquid Glass: blur leve, para o papel de parede continuar
@@ -59,8 +56,6 @@ export default class AtolBridge extends Extension {
             this._untrack(window, true);
         this._docks = null;
         this._constraint = null;
-        this._apps.destroy();
-        this._apps = null;
         global.compositor.set_background_blur_params(...this._blurDefaults);
         this._blurDefaults = null;
     }
