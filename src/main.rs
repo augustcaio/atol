@@ -1,5 +1,8 @@
 use adw::prelude::*;
 
+mod bridge;
+mod dock;
+
 const APP_ID: &str = "io.github.augustcaio.Atol.Dock";
 
 // A janela é transparente; só a pílula da dock tem fundo. A margem afasta a pílula
@@ -9,8 +12,9 @@ const APP_ID: &str = "io.github.augustcaio.Atol.Dock";
 const CSS: &str = "
 window.atol { background: none; }
 .dock {
-    min-width: 32rem;
-    min-height: 4rem;
+    /* sem altura fixa: o botão quadrado (ícone 2.5rem + 0.75rem) mais o padding dão 4rem */
+    padding: 0.375rem 0.5rem;
+    border-spacing: 0.25rem;
     margin: 0.5rem 1rem 0.75rem;
     border-radius: 1.25rem;
     /* pouco preenchimento: aparece o fundo desfocado, não uma camada leitosa */
@@ -26,6 +30,29 @@ window.atol { background: none; }
         inset 0 0 0.75rem alpha(white, 0.05),
         0 0.4rem 1.25rem alpha(black, 0.2);
 }
+.dock button.app {
+    padding: 0.375rem;
+    border-radius: 0.875rem;
+    background: none;
+    box-shadow: none;
+}
+.dock button.app:hover { background-color: alpha(white, 0.1); }
+.dock button.app:active { background-color: alpha(white, 0.18); }
+.dock button.app > image { -gtk-icon-size: 2.5rem; }
+.dock > separator {
+    margin: 0.5rem 0.125rem;
+    background-color: alpha(@window_fg_color, 0.18);
+}
+/* um ponto por app aberto, mais largo no app em foco, na cor de destaque se pede atenção */
+.indicator {
+    min-width: 0.3rem;
+    min-height: 0.3rem;
+    margin-bottom: 0.125rem;
+    border-radius: 1rem;
+    background-color: alpha(@window_fg_color, 0.6);
+}
+.indicator.focused { min-width: 1rem; background-color: @window_fg_color; }
+.indicator.urgent { background-color: @accent_bg_color; }
 ";
 
 fn main() -> gtk::glib::ExitCode {
@@ -42,16 +69,24 @@ fn main() -> gtk::glib::ExitCode {
     });
 
     app.connect_activate(|app| {
-        let dock = gtk::Box::builder().css_classes(["dock"]).build();
-        gtk::ApplicationWindow::builder()
+        // Abrir o Atol de novo só traz a dock que já existe.
+        if let Some(window) = app.active_window() {
+            window.present();
+            return;
+        }
+        let conn = app.dbus_connection().expect("o app se registra no D-Bus antes do activate");
+        let dock = dock::Dock::new(conn);
+        let window = gtk::ApplicationWindow::builder()
             .application(app)
             .title("Atol")
             .decorated(false)
             .resizable(false)
             .css_classes(["atol"])
-            .child(&dock)
-            .build()
-            .present();
+            .child(&dock.widget)
+            .build();
+        // A dock vive enquanto a janela existir.
+        window.connect_destroy(move |_| drop(dock.clone()));
+        window.present();
     });
 
     app.run()
