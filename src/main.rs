@@ -14,8 +14,7 @@ window.atol { background: none; }
 .dock {
     /* sem altura fixa: o botão quadrado (ícone 2.5rem + 0.75rem) mais o padding dão 4rem.
        Padding igual nos quatro lados: os cantos do hover ficam concêntricos aos da pílula. */
-    padding: 0.375rem;
-    border-spacing: 0.25rem;
+    padding: 0.375rem 0.25rem;
     margin: 0.5rem 1rem 0.75rem;
     border-radius: 0.625rem;
     /* pouco preenchimento: aparece o fundo desfocado, não uma camada leitosa */
@@ -31,6 +30,10 @@ window.atol { background: none; }
         inset 0 0 0.75rem alpha(white, 0.05),
         0 0.4rem 1.25rem alpha(black, 0.2);
 }
+/* Espaço entre itens como margem, e não border-spacing: assim a vaga do arrasto
+   abre de 0 sem pulo. Margem de 0.125rem + padding lateral de 0.25rem = os
+   mesmos 0.375rem de cima, e os cantos continuam concêntricos. */
+.dock > overlay, .dock > button { margin: 0 0.125rem; }
 .dock button.app {
     padding: 0.375rem;
     /* raio da pílula menos o padding dela (0.625rem − 0.375rem): encaixe concêntrico */
@@ -42,7 +45,7 @@ window.atol { background: none; }
 .dock button.app:active { background-color: alpha(white, 0.18); }
 .dock button.app > image { -gtk-icon-size: 2.5rem; }
 .dock > separator {
-    margin: 0.5rem 0.125rem;
+    margin: 0.5rem 0.375rem;
     background-color: alpha(@window_fg_color, 0.18);
 }
 /* um ponto por app aberto, mais largo no app em foco, na cor de destaque se pede atenção */

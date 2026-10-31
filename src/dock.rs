@@ -3,8 +3,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use adw::prelude::*;
 use gtk::glib::{self, variant::ToVariant};
-use gtk::prelude::*;
 use gtk::gio;
 
 use crate::bridge::{self, RunningApp};
@@ -15,6 +15,18 @@ const FAVORITES: &str = "favorite-apps";
 /// Favoritos, na ordem do usuário, e depois os apps abertos que não são favoritos.
 type Layout = (Vec<String>, Vec<String>);
 
+/// Arrasto em andamento. A grade dos favoritos é medida antes de qualquer animação:
+/// se a posição de destino seguisse os ícones deslizando, o espaço ficaria pulando.
+struct Drag {
+    /// Favoritos sem o app arrastado, na ordem da dock.
+    others: Vec<String>,
+    /// Borda esquerda do primeiro favorito e a largura de cada vaga.
+    x0: f64,
+    slot: f64,
+    index: Option<usize>,
+    gap: Option<gtk::Box>,
+}
+
 pub struct Dock {
     pub widget: gtk::Box,
     conn: gio::DBusConnection,
@@ -22,6 +34,9 @@ pub struct Dock {
     running: RefCell<Vec<RunningApp>>,
     layout: RefCell<Option<Layout>>,
     indicators: RefCell<HashMap<String, gtk::Box>>,
+    // Favoritos visíveis, na ordem da dock, com o widget de cada um.
+    slots: RefCell<Vec<(String, gtk::Overlay)>>,
+    drag: RefCell<Option<Drag>>,
     // Reconstruir a dock com um menu aberto destruiria o menu; espera ele fechar.
     menu_open: Cell<bool>,
     subscription: RefCell<Option<gio::SignalSubscription>>,
@@ -36,6 +51,8 @@ impl Dock {
             running: RefCell::default(),
             layout: RefCell::default(),
             indicators: RefCell::default(),
+            slots: RefCell::default(),
+            drag: RefCell::default(),
             menu_open: Cell::new(false),
             subscription: RefCell::default(),
         });
@@ -59,9 +76,22 @@ impl Dock {
         // Soltar um app na dock fixa ele ali, ou só muda a ordem se já é favorito.
         let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
         let weak = Rc::downgrade(&dock);
-        drop.connect_drop(move |_, value, x, _| match (weak.upgrade(), value.get::<String>()) {
-            (Some(dock), Ok(id)) => dock.drop_at(&id, x),
+        drop.connect_drop(move |_, value, _, _| match (weak.upgrade(), value.get::<String>()) {
+            (Some(dock), Ok(id)) => dock.drop_here(&id),
             _ => false,
+        });
+        let weak = Rc::downgrade(&dock);
+        drop.connect_motion(move |_, x, _| {
+            if let Some(dock) = weak.upgrade() {
+                dock.drag_motion(x);
+            }
+            gtk::gdk::DragAction::MOVE
+        });
+        let weak = Rc::downgrade(&dock);
+        drop.connect_leave(move |_| {
+            if let Some(dock) = weak.upgrade() {
+                dock.drag_leave();
+            }
         });
         dock.widget.add_controller(drop);
 
@@ -70,7 +100,8 @@ impl Dock {
     }
 
     fn refresh(self: &Rc<Self>) {
-        if self.menu_open.get() {
+        // Com menu aberto ou arrasto em curso, reconstruir puxaria os widgets em uso.
+        if self.menu_open.get() || self.drag.borrow().is_some() {
             return;
         }
         let layout = layout(&self.favorites(), &self.running.borrow(), |id| {
@@ -90,9 +121,11 @@ impl Dock {
         }
         self.indicators.borrow_mut().clear();
 
-        for id in pinned {
-            self.widget.append(&self.app_button(id));
+        let slots: Vec<_> = pinned.iter().map(|id| (id.clone(), self.app_button(id))).collect();
+        for (_, item) in &slots {
+            self.widget.append(item);
         }
+        self.slots.replace(slots);
         if !pinned.is_empty() && !others.is_empty() {
             self.widget.append(&gtk::Separator::new(gtk::Orientation::Vertical));
         }
@@ -127,11 +160,8 @@ impl Dock {
 
     fn app_button(self: &Rc<Self>, id: &str) -> gtk::Overlay {
         let info = gio_unix::DesktopAppInfo::new(id).expect("layout() só deixa apps instalados");
-        let icon = gtk::Image::new();
-        match info.icon() {
-            Some(gicon) => icon.set_from_gicon(&gicon),
-            None => icon.set_icon_name(Some("application-x-executable")),
-        }
+        let gicon = info.icon().unwrap_or_else(|| gio::ThemedIcon::new("application-x-executable").upcast());
+        let icon = gtk::Image::from_gicon(&gicon);
         let button = gtk::Button::builder()
             .child(&icon)
             .tooltip_text(info.name())
@@ -161,9 +191,27 @@ impl Dock {
             .actions(gtk::gdk::DragAction::MOVE)
             .content(&gtk::gdk::ContentProvider::for_value(&id.to_value()))
             .build();
+        let (weak, app_id) = (Rc::downgrade(self), id.to_owned());
         drag.connect_drag_begin(move |source, _| {
-            let paintable = gtk::WidgetPaintable::new(Some(&icon));
-            source.set_icon(Some(&paintable), icon.width() / 2, icon.height() / 2);
+            // Ícone do tema, e não uma foto do botão: o botão some da dock durante o arrasto.
+            let size = icon.width();
+            let paintable = gtk::IconTheme::for_display(&icon.display()).lookup_by_gicon(
+                &gicon,
+                size,
+                icon.scale_factor(),
+                gtk::TextDirection::None,
+                gtk::IconLookupFlags::empty(),
+            );
+            source.set_icon(Some(&paintable), size / 2, size / 2);
+            if let Some(dock) = weak.upgrade() {
+                dock.begin_drag(&app_id);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        drag.connect_drag_end(move |_, _, _| {
+            if let Some(dock) = weak.upgrade() {
+                dock.end_drag();
+            }
         });
         button.add_controller(drag);
 
@@ -276,27 +324,92 @@ impl Dock {
         self.save_favorites(&favorites);
     }
 
-    fn drop_at(self: &Rc<Self>, id: &str, x: f64) -> bool {
+    fn begin_drag(&self, id: &str) {
+        let slots = self.slots.borrow();
+        let bounds: Vec<_> = slots.iter().filter_map(|(_, w)| w.compute_bounds(&self.widget)).collect();
+        let (x0, slot) = match bounds.as_slice() {
+            [] => (0.0, 1.0),
+            [only] => (f64::from(only.x()), f64::from(only.width())),
+            [first, second, ..] => {
+                let slot = f64::from(second.x() - first.x());
+                (f64::from(first.x()) - (slot - f64::from(first.width())) / 2.0, slot)
+            }
+        };
+        let mut drag = Drag {
+            others: slots.iter().map(|(s, _)| s.clone()).filter(|s| s != id).collect(),
+            x0,
+            slot,
+            index: None,
+            gap: None,
+        };
+        // Um favorito arrastado deixa uma vaga do tamanho dele, sem animação, no lugar onde estava.
+        if let Some(position) = slots.iter().position(|(s, _)| s == id) {
+            let item = &slots[position].1;
+            let gap = gap(slot);
+            self.widget.insert_child_after(&gap, Some(item));
+            item.set_visible(false);
+            drag.index = Some(position);
+            drag.gap = Some(gap);
+        }
+        self.drag.replace(Some(drag));
+    }
+
+    fn drag_motion(&self, x: f64) {
+        let mut drag = self.drag.borrow_mut();
+        let Some(drag) = drag.as_mut() else { return };
+        let index = drop_index(x, drag.x0, drag.slot, drag.others.len());
+        if drag.index == Some(index) {
+            return;
+        }
+        if let Some(old) = drag.gap.take() {
+            close_gap(old);
+        }
+        // A vaga nova entra antes do favorito que vai ser empurrado, ou depois do último.
+        let slots = self.slots.borrow();
+        let widget_of = |id: &String| slots.iter().find(|(s, _)| s == id).map(|(_, w)| w.clone().upcast::<gtk::Widget>());
+        let after = match drag.others.get(index) {
+            Some(next) => widget_of(next).and_then(|w| w.prev_sibling()),
+            None => drag.others.last().and_then(widget_of),
+        };
+        let new = gap(0.0);
+        self.widget.insert_child_after(&new, after.as_ref());
+        animate_width(&new, drag.slot, |_| {});
+        drag.index = Some(index);
+        drag.gap = Some(new);
+    }
+
+    // Saindo da dock (para desafixar no botão de aplicativos, por exemplo), a vaga fecha.
+    fn drag_leave(&self) {
+        if let Some(drag) = self.drag.borrow_mut().as_mut() {
+            drag.index = None;
+            if let Some(old) = drag.gap.take() {
+                close_gap(old);
+            }
+        }
+    }
+
+    fn drop_here(self: &Rc<Self>, id: &str) -> bool {
         // Qualquer texto pode ser arrastado até aqui; só apps instalados viram favoritos.
         if gio_unix::DesktopAppInfo::new(id).is_none() {
             return false;
         }
-        let pinned = self.layout.borrow().as_ref().map(|(p, _)| p.clone()).unwrap_or_default();
-        // Os primeiros filhos da dock são os favoritos, na ordem de `pinned`;
-        // o app solto entra antes do primeiro cujo centro fica à direita do ponto.
-        let mut before = None;
-        let mut child = self.widget.first_child();
-        for pinned_id in &pinned {
-            let Some(widget) = child else { break };
-            let center = widget.compute_bounds(&self.widget).map(|b| f64::from(b.x() + b.width() / 2.0));
-            if pinned_id != id && center.is_some_and(|c| x < c) {
-                before = Some(pinned_id.as_str());
-                break;
-            }
-            child = widget.next_sibling();
-        }
+        let drag = self.drag.borrow();
+        let Some(Drag { others, index: Some(index), .. }) = drag.as_ref() else { return false };
+        let before = others.get(*index).map(String::as_str);
         self.save_favorites_later(move_favorite(&self.favorites(), id, before));
         true
+    }
+
+    // Terminou (soltou ou cancelou): a dock volta a ser desenhada a partir dos favoritos.
+    fn end_drag(self: &Rc<Self>) {
+        self.drag.replace(None);
+        self.layout.replace(None);
+        let weak = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            if let Some(dock) = weak.upgrade() {
+                dock.refresh();
+            }
+        });
     }
 
     fn sync_indicators(&self) {
@@ -325,6 +438,36 @@ fn layout(favorites: &[String], running: &[RunningApp], installed: impl Fn(&str)
         .cloned()
         .collect();
     (pinned, others)
+}
+
+/// Posição de destino de um arrasto: o app entra antes do favorito cujo centro
+/// fica à direita do ponteiro, contado na grade medida no começo do arrasto.
+fn drop_index(x: f64, x0: f64, slot: f64, count: usize) -> usize {
+    (((x - x0) / slot).round().max(0.0) as usize).min(count)
+}
+
+fn gap(width: f64) -> gtk::Box {
+    gtk::Box::builder().css_classes(["gap"]).width_request(width as i32).build()
+}
+
+fn animate_width(widget: &gtk::Box, to: f64, done: impl Fn(&adw::TimedAnimation) + 'static) {
+    let target = adw::CallbackAnimationTarget::new(glib::clone!(
+        #[weak]
+        widget,
+        move |width| widget.set_width_request(width as i32)
+    ));
+    let animation = adw::TimedAnimation::new(widget, f64::from(widget.width_request()), to, 200, target);
+    animation.set_easing(adw::Easing::EaseOutCubic);
+    animation.connect_done(done);
+    animation.play();
+}
+
+fn close_gap(gap: gtk::Box) {
+    animate_width(&gap.clone(), 0.0, move |_| {
+        if let Some(parent) = gap.parent().and_downcast::<gtk::Box>() {
+            parent.remove(&gap);
+        }
+    });
 }
 
 /// Tira `id` dos favoritos e o põe antes de `before`, ou no fim.
@@ -413,6 +556,15 @@ mod tests {
         // um app novo entra como favorito; um `before` que sumiu manda para o fim
         assert_eq!(move_favorite(&favorites, "d", Some("b")), ["a", "d", "b", "c"]);
         assert_eq!(move_favorite(&favorites, "d", Some("x")), ["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn drop_index_follows_slot_centers() {
+        // vagas de 50px a partir de x=10: centros em 35, 85, 135
+        assert_eq!(drop_index(0.0, 10.0, 50.0, 3), 0);
+        assert_eq!(drop_index(34.0, 10.0, 50.0, 3), 0);
+        assert_eq!(drop_index(36.0, 10.0, 50.0, 3), 1);
+        assert_eq!(drop_index(500.0, 10.0, 50.0, 3), 3);
     }
 
     #[test]
