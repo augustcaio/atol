@@ -1,0 +1,7 @@
+{
+  "uuid": "atol-bridge@augustcaio.github.io",
+  "name": "Atol Bridge",
+  "description": "Liga a dock do Atol ao GNOME Shell: fixa a janela na borda da tela e reserva o espaço dela.",
+  "shell-version": ["51"],
+  "url": "https://github.com/augustcaio/atol"
+}
