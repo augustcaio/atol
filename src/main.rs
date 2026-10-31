@@ -2,10 +2,21 @@ use adw::prelude::*;
 
 const APP_ID: &str = "io.github.augustcaio.Atol.Dock";
 
-// A janela é transparente; só a pílula da dock tem fundo.
+// A janela é transparente; só a pílula da dock tem fundo. A margem afasta a pílula
+// da borda da tela e dá espaço para a sombra. O backdrop-filter vira blur do
+// compositor (protocolo ext-background-effect do Mutter 51).
 const CSS: &str = "
 window.atol { background: none; }
-.dock { background-color: alpha(@window_bg_color, 0.85); border-radius: 24px; }
+.dock {
+    min-width: 480px;
+    min-height: 64px;
+    margin: 8px 16px 12px;
+    border-radius: 28px;
+    background-color: alpha(@window_bg_color, 0.35);
+    background-image: linear-gradient(to bottom, alpha(white, 0.14), alpha(white, 0.02));
+    backdrop-filter: blur(24px);
+    box-shadow: 0 6px 20px alpha(black, 0.25);
+}
 ";
 
 fn main() -> gtk::glib::ExitCode {
@@ -22,11 +33,7 @@ fn main() -> gtk::glib::ExitCode {
     });
 
     app.connect_activate(|app| {
-        let dock = gtk::Box::builder()
-            .css_classes(["dock"])
-            .width_request(480)
-            .height_request(64)
-            .build();
+        let dock = gtk::Box::builder().css_classes(["dock"]).build();
         gtk::ApplicationWindow::builder()
             .application(app)
             .title("Atol")
